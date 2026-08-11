@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#0d0d0d">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="壁紙生成">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="description" content="余白なし・フル解像度でスマホ待ち受け用に画像をトリミングするツール">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<title>壁紙ジェネレーター（フルサイズ・トリミング）</title>
+<style>
+  * {
+    box-sizing: border-box;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
+    margin: 0;
+    padding: 16px;
+    background: #0d0d0d;
+    color: #f0f0f0;
+    min-height: 100dvh;
+    line-height: 1.5;
+  }
+
+  h1 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin: 0 0 4px;
+  }
+
+  .subtitle {
+    font-size: 0.85rem;
+    color: #aaa;
+    margin-bottom: 16px;
+  }
+
+  .info-box {
+    background: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 0.8rem;
+    color: #ccc;
+    margin-bottom: 16px;
+  }
+
+  .info-box strong {
+    color: #fff;
+  }
+
+  .file-area {
+    margin-bottom: 16px;
+  }
+
+  .file-label {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    padding: 14px;
+    background: #222;
+    border: 2px dashed #555;
+    border-radius: 12px;
+    color: #ddd;
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+  }
+
+  .file-label:active,
+  .file-label:hover {
+    background: #2a2a2a;
+    border-color: #777;
+  }
+
+  #fileInput {
+    display: none;
+  }
+
+  .preview-wrap {
+    position: relative;
+    width: 100%;
+    max-width: 420px;
+    margin: 0 auto 16px;
+    background: #000;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid #333;
+    touch-action: none; /* ドラッグ用 */
+  }
+
+  #previewCanvas {
+    display: block;
+    width: 100%;
+    height: auto;
+    cursor: grab;
+    background: #000;
+  }
+
+  #previewCanvas.dragging {
+    cursor: grabbing;
+  }
+
+  .controls {
+    max-width: 420px;
+    margin: 0 auto;
+  }
+
+  .slider-group {
+    margin-bottom: 14px;
+  }
+
+  .slider-group label {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.85rem;
+    color: #bbb;
+    margin-bottom: 6px;
+  }
+
+  .slider-group .value {
+    font-variant-numeric: tabular-nums;
+    color: #fff;
+    min-width: 3.2em;
+    text-align: right;
+  }
+
+  input[type="range"] {
+    width: 100%;
+    height: 28px;
+    accent-color: #6af;
+    cursor: pointer;
+  }
+
+  .btn-row {
+    display: flex;
+    gap: 10px;
+    margin-top: 8px;
+    margin-bottom: 20px;
+  }
+
+  button {
+    flex: 1;
+    padding: 14px 12px;
+    font-size: 0.95rem;
+    font-weight: 500;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background 0.15s, transform 0.1s;
+  }
+
+  button:active {
+    transform: scale(0.98);
+  }
+
+  #resetBtn {
+    background: #2a2a2a;
+    color: #ddd;
+    border: 1px solid #444;
+  }
+
+  #resetBtn:hover {
+    background: #333;
+  }
+
+  #downloadBtn {
+    background: #1a6bff;
+    color: #fff;
+  }
+
+  #downloadBtn:hover {
+    background: #1558d6;
+  }
+
+  #downloadBtn:disabled {
+    background: #333;
+    color: #777;
+    cursor: not-allowed;
+  }
+
+  .hint {
+    font-size: 0.75rem;
+    color: #888;
+    text-align: center;
+    margin-top: 8px;
+  }
+
+  .status {
+    font-size: 0.8rem;
+    color: #6af;
+    text-align: center;
+    min-height: 1.2em;
+    margin-top: 8px;
+  }
+</style>
+</head>
+<body>
+
+  <h1>壁紙ジェネレーター</h1>
+  <p class="subtitle">余白なし・フル解像度でスマホ待ち受け用にトリミング</p>
+
+  <div class="info-box" id="infoBox">
+    対象解像度: <strong id="resText">検出中…</strong><br>
+    画像: <span id="imgInfo">未選択</span>
+  </div>
+
+  <div class="file-area">
+    <label class="file-label" for="fileInput">
+      <span>📁</span>
+      <span id="fileLabelText">画像を選択（タップ）</span>
+    </label>
+    <input type="file" id="fileInput" accept="image/*">
+  </div>
+
+  <div class="preview-wrap" id="previewWrap">
+    <canvas id="previewCanvas"></canvas>
+  </div>
+
+  <div class="controls">
+    <div class="slider-group">
+      <label>
+        <span>左右位置</span>
+        <span class="value" id="xValue">0.00</span>
+      </label>
+      <input type="range" id="xSlider" min="-1" max="1" step="0.01" value="0">
+    </div>
+
+    <div class="slider-group">
+      <label>
+        <span>上下位置</span>
+        <span class="value" id="yValue">0.00</span>
+      </label>
+      <input type="range" id="ySlider" min="-1" max="1" step="0.01" value="0">
+    </div>
+
+    <div class="btn-row">
+      <button type="button" id="resetBtn">中央に戻す</button>
+      <button type="button" id="downloadBtn" disabled>画像を保存</button>
+    </div>
+
+    <p class="hint">プレビューをドラッグしても位置を動かせます</p>
+    <p class="status" id="status"></p>
+  </div>
+
+<script>
+(() => {
+  // ===== 解像度（実機の物理ピクセル） =====
+  const dpr = window.devicePixelRatio || 1;
+  const screenW = Math.round(window.screen.width * dpr);
+  const screenH = Math.round(window.screen.height * dpr);
+
+  document.getElementById("resText").textContent =
+    `${screenW} × ${screenH} px（この端末）`;
+
+  // ===== DOM =====
+  const fileInput = document.getElementById("fileInput");
+  const fileLabelText = document.getElementById("fileLabelText");
+  const previewCanvas = document.getElementById("previewCanvas");
+  const previewCtx = previewCanvas.getContext("2d");
+  const xSlider = document.getElementById("xSlider");
+  const ySlider = document.getElementById("ySlider");
+  const xValue = document.getElementById("xValue");
+  const yValue = document.getElementById("yValue");
+  const resetBtn = document.getElementById("resetBtn");
+  const downloadBtn = document.getElementById("downloadBtn");
+  const imgInfo = document.getElementById("imgInfo");
+  const status = document.getElementById("status");
+  const previewWrap = document.getElementById("previewWrap");
+
+  // フル解像度用の隠しキャンバス
+  const fullCanvas = document.createElement("canvas");
+  fullCanvas.width = screenW;
+  fullCanvas.height = screenH;
+  const fullCtx = fullCanvas.getContext("2d");
+
+  let img = null;
+  let imgName = "";
+
+  // プレビュー表示サイズ（CSS幅に合わせて）
+  function getPreviewSize() {
+    const maxW = Math.min(previewWrap.clientWidth || 360, 420);
+    const ratio = screenW / screenH;
+    const w = maxW;
+    const h = Math.round(w / ratio);
+    return { w, h, scale: w / screenW };
+  }
+
+  function updateSliderLabels() {
+    xValue.textContent = Number(xSlider.value).toFixed(2);
+    yValue.textContent = Number(ySlider.value).toFixed(2);
+  }
+
+  function draw() {
+    if (!img) return;
+
+    const imgRatio = img.width / img.height;
+    const screenRatio = screenW / screenH;
+
+    let drawW, drawH;
+    // cover（余白なしで画面いっぱい）
+    if (imgRatio > screenRatio) {
+      drawH = screenH;
+      drawW = imgRatio * drawH;
+    } else {
+      drawW = screenW;
+      drawH = drawW / imgRatio;
+    }
+
+    const ox = (screenW - drawW) / 2 + Number(xSlider.value) * (drawW - screenW) / 2;
+    const oy = (screenH - drawH) / 2 + Number(ySlider.value) * (drawH - screenH) / 2;
+
+    // フル解像度
+    fullCtx.clearRect(0, 0, screenW, screenH);
+    fullCtx.drawImage(img, ox, oy, drawW, drawH);
+
+    // プレビュー
+    const { w, h } = getPreviewSize();
+    previewCanvas.width = w;
+    previewCanvas.height = h;
+    previewCtx.clearRect(0, 0, w, h);
+    previewCtx.drawImage(fullCanvas, 0, 0, w, h);
+  }
+
+  // ===== ファイル読み込み =====
+  fileInput.addEventListener("change", (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    imgName = file.name || "image";
+    fileLabelText.textContent = imgName.length > 24
+      ? imgName.slice(0, 22) + "…"
+      : imgName;
+
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      img = image;
+      imgInfo.textContent = `${img.width} × ${img.height} px`;
+      downloadBtn.disabled = false;
+      status.textContent = "";
+      xSlider.value = 0;
+      ySlider.value = 0;
+      updateSliderLabels();
+      draw();
+    };
+    image.onerror = () => {
+      status.textContent = "画像の読み込みに失敗しました";
+      URL.revokeObjectURL(url);
+    };
+    image.src = url;
+  });
+
+  // ===== スライダー =====
+  function onSlider() {
+    updateSliderLabels();
+    draw();
+  }
+  xSlider.addEventListener("input", onSlider);
+  ySlider.addEventListener("input", onSlider);
+
+  resetBtn.addEventListener("click", () => {
+    xSlider.value = 0;
+    ySlider.value = 0;
+    updateSliderLabels();
+    draw();
+  });
+
+  // ===== ドラッグでパン =====
+  let dragging = false;
+  let startX = 0, startY = 0;
+  let startSliderX = 0, startSliderY = 0;
+
+  function pointerDown(clientX, clientY) {
+    if (!img) return;
+    dragging = true;
+    previewCanvas.classList.add("dragging");
+    startX = clientX;
+    startY = clientY;
+    startSliderX = Number(xSlider.value);
+    startSliderY = Number(ySlider.value);
+  }
+
+  function pointerMove(clientX, clientY) {
+    if (!dragging || !img) return;
+
+    const { w, h } = getPreviewSize();
+    // 移動量をスライダー範囲（-1〜1）に変換
+    // 画面幅の半分程度動かすと端まで行く程度の感度
+    const dx = (clientX - startX) / (w * 0.5);
+    const dy = (clientY - startY) / (h * 0.5);
+
+    // 画像を動かす方向に合わせる（指を右に動かすと画像が右に＝左端が見える）
+    let nx = startSliderX - dx;
+    let ny = startSliderY - dy;
+    nx = Math.max(-1, Math.min(1, nx));
+    ny = Math.max(-1, Math.min(1, ny));
+
+    xSlider.value = nx.toFixed(2);
+    ySlider.value = ny.toFixed(2);
+    updateSliderLabels();
+    draw();
+  }
+
+  function pointerUp() {
+    dragging = false;
+    previewCanvas.classList.remove("dragging");
+  }
+
+  // マウス
+  previewCanvas.addEventListener("mousedown", (e) => {
+    e.preventDefault();
+    pointerDown(e.clientX, e.clientY);
+  });
+  window.addEventListener("mousemove", (e) => {
+    if (dragging) pointerMove(e.clientX, e.clientY);
+  });
+  window.addEventListener("mouseup", pointerUp);
+
+  // タッチ
+  previewCanvas.addEventListener("touchstart", (e) => {
+    if (e.touches.length !== 1) return;
+    e.preventDefault();
+    const t = e.touches[0];
+    pointerDown(t.clientX, t.clientY);
+  }, { passive: false });
+
+  window.addEventListener("touchmove", (e) => {
+    if (!dragging || e.touches.length !== 1) return;
+    e.preventDefault();
+    const t = e.touches[0];
+    pointerMove(t.clientX, t.clientY);
+  }, { passive: false });
+
+  window.addEventListener("touchend", pointerUp);
+  window.addEventListener("touchcancel", pointerUp);
+
+  // ===== 保存 =====
+  downloadBtn.addEventListener("click", () => {
+    if (!img) return;
+    status.textContent = "保存中…";
+    // 少し遅らせてUIを更新
+    requestAnimationFrame(() => {
+      try {
+        const link = document.createElement("a");
+        link.href = fullCanvas.toDataURL("image/png");
+        const base = imgName.replace(/\.[^.]+$/, "") || "wallpaper";
+        link.download = `${base}_wallpaper_${screenW}x${screenH}.png`;
+        link.click();
+        status.textContent = "保存しました（フル解像度PNG）";
+        setTimeout(() => { status.textContent = ""; }, 2500);
+      } catch (err) {
+        status.textContent = "保存に失敗しました（メモリ不足の可能性）";
+      }
+    });
+  });
+
+  // リサイズ時にプレビュー再描画
+  let resizeTimer;
+  window.addEventListener("resize", () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      if (img) draw();
+    }, 150);
+  });
+
+  updateSliderLabels();
+
+  // ===== Service Worker（PWA） =====
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("./sw.js").catch(() => {});
+    });
+  }
+})();
+</script>
+</body>
+</html>
