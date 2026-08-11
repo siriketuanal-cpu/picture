@@ -237,20 +237,12 @@
       <input type="range" id="xSlider" min="-1" max="1" step="0.01" value="0">
     </div>
 
-    <div class="slider-group">
-      <label>
-        <span>上下位置</span>
-        <span class="value" id="yValue">0.00</span>
-      </label>
-      <input type="range" id="ySlider" min="-1" max="1" step="0.01" value="0">
-    </div>
-
     <div class="btn-row">
       <button type="button" id="resetBtn">中央に戻す</button>
       <button type="button" id="downloadBtn" disabled>画像を保存</button>
     </div>
 
-    <p class="hint">プレビューを左右にドラッグで位置調整（上下スクロールはそのまま使えます）</p>
+    <p class="hint">プレビューを左右にドラッグで位置調整（上下はそのままスクロール）</p>
     <p class="status" id="status"></p>
   </div>
 
@@ -270,9 +262,7 @@
   const previewCanvas = document.getElementById("previewCanvas");
   const previewCtx = previewCanvas.getContext("2d");
   const xSlider = document.getElementById("xSlider");
-  const ySlider = document.getElementById("ySlider");
   const xValue = document.getElementById("xValue");
-  const yValue = document.getElementById("yValue");
   const resetBtn = document.getElementById("resetBtn");
   const downloadBtn = document.getElementById("downloadBtn");
   const imgInfo = document.getElementById("imgInfo");
@@ -299,7 +289,6 @@
 
   function updateSliderLabels() {
     xValue.textContent = Number(xSlider.value).toFixed(2);
-    yValue.textContent = Number(ySlider.value).toFixed(2);
   }
 
   function draw() {
@@ -318,8 +307,9 @@
       drawH = drawW / imgRatio;
     }
 
+    // 左右のみ調整。上下は常に中央
     const ox = (screenW - drawW) / 2 + Number(xSlider.value) * (drawW - screenW) / 2;
-    const oy = (screenH - drawH) / 2 + Number(ySlider.value) * (drawH - screenH) / 2;
+    const oy = (screenH - drawH) / 2;
 
     // フル解像度
     fullCtx.clearRect(0, 0, screenW, screenH);
@@ -352,7 +342,6 @@
       downloadBtn.disabled = false;
       status.textContent = "";
       xSlider.value = 0;
-      ySlider.value = 0;
       updateSliderLabels();
       draw();
     };
@@ -369,35 +358,28 @@
     draw();
   }
   xSlider.addEventListener("input", onSlider);
-  ySlider.addEventListener("input", onSlider);
 
   resetBtn.addEventListener("click", () => {
     xSlider.value = 0;
-    ySlider.value = 0;
     updateSliderLabels();
     draw();
   });
 
-  // ===== ドラッグでパン（スクロールと共存） =====
-  // 縦スクロール優先。ある程度動かしてから「パン」と判定する
+  // ===== 左右ドラッグのみ（上下はページスクロール） =====
   const PAN_THRESHOLD = 10; // px
-  let pointerActive = false;   // 指/マウスが押されている
-  let panning = false;         // パン操作中（スクロールではない）
-  let scrolling = false;       // ページスクロールと判定済み
+  let pointerActive = false;
+  let panning = false;
+  let scrolling = false;
   let startX = 0, startY = 0;
-  let startSliderX = 0, startSliderY = 0;
+  let startSliderX = 0;
 
-  function applyPan(clientX, clientY) {
+  function applyPanX(clientX) {
     if (!img) return;
-    const { w, h } = getPreviewSize();
+    const { w } = getPreviewSize();
     const dx = (clientX - startX) / (w * 0.5);
-    const dy = (clientY - startY) / (h * 0.5);
     let nx = startSliderX - dx;
-    let ny = startSliderY - dy;
     nx = Math.max(-1, Math.min(1, nx));
-    ny = Math.max(-1, Math.min(1, ny));
     xSlider.value = nx.toFixed(2);
-    ySlider.value = ny.toFixed(2);
     updateSliderLabels();
     draw();
   }
@@ -410,7 +392,6 @@
     startX = clientX;
     startY = clientY;
     startSliderX = Number(xSlider.value);
-    startSliderY = Number(ySlider.value);
   }
 
   function pointerMove(clientX, clientY, event) {
@@ -421,16 +402,14 @@
     const absX = Math.abs(dx);
     const absY = Math.abs(dy);
 
-    // まだパン/スクロールを決めていない
     if (!panning && !scrolling) {
       if (absX < PAN_THRESHOLD && absY < PAN_THRESHOLD) return;
-
-      // 縦の動きが大きければスクロール扱い（パンしない）
-      if (absY > absX) {
+      // 縦の方が大きければスクロール（パンしない）
+      if (absY >= absX) {
         scrolling = true;
         return;
       }
-      // 横の動きが主 → パン開始
+      // 横の方が大きい → 左右パン開始
       panning = true;
       previewCanvas.classList.add("dragging");
     }
@@ -439,7 +418,7 @@
 
     if (panning) {
       if (event) event.preventDefault();
-      applyPan(clientX, clientY);
+      applyPanX(clientX);
     }
   }
 
@@ -450,7 +429,7 @@
     previewCanvas.classList.remove("dragging");
   }
 
-  // マウス（デスクトップは従来どおりすぐパン）
+  // マウス
   previewCanvas.addEventListener("mousedown", (e) => {
     e.preventDefault();
     pointerDown(e.clientX, e.clientY);
@@ -458,13 +437,11 @@
     previewCanvas.classList.add("dragging");
   });
   window.addEventListener("mousemove", (e) => {
-    if (pointerActive && panning) {
-      applyPan(e.clientX, e.clientY);
-    }
+    if (pointerActive && panning) applyPanX(e.clientX);
   });
   window.addEventListener("mouseup", pointerUp);
 
-  // タッチ：縦スクロールを邪魔しない
+  // タッチ：上下はそのままスクロール、左右だけパン
   previewCanvas.addEventListener("touchstart", (e) => {
     if (e.touches.length !== 1) return;
     const t = e.touches[0];
