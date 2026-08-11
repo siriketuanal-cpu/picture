@@ -94,7 +94,8 @@
     border-radius: 12px;
     overflow: hidden;
     border: 1px solid #333;
-    touch-action: none; /* ドラッグ用 */
+    /* 縦スクロールは許可。パン開始後は JS で制御 */
+    touch-action: pan-y;
   }
 
   #previewCanvas {
@@ -107,6 +108,7 @@
 
   #previewCanvas.dragging {
     cursor: grabbing;
+    touch-action: none;
   }
 
   .controls {
@@ -248,7 +250,7 @@
       <button type="button" id="downloadBtn" disabled>画像を保存</button>
     </div>
 
-    <p class="hint">プレビューをドラッグしても位置を動かせます</p>
+    <p class="hint">プレビューを左右にドラッグで位置調整（上下スクロールはそのまま使えます）</p>
     <p class="status" id="status"></p>
   </div>
 
@@ -376,70 +378,103 @@
     draw();
   });
 
-  // ===== ドラッグでパン =====
-  let dragging = false;
+  // ===== ドラッグでパン（スクロールと共存） =====
+  // 縦スクロール優先。ある程度動かしてから「パン」と判定する
+  const PAN_THRESHOLD = 10; // px
+  let pointerActive = false;   // 指/マウスが押されている
+  let panning = false;         // パン操作中（スクロールではない）
+  let scrolling = false;       // ページスクロールと判定済み
   let startX = 0, startY = 0;
   let startSliderX = 0, startSliderY = 0;
 
-  function pointerDown(clientX, clientY) {
+  function applyPan(clientX, clientY) {
     if (!img) return;
-    dragging = true;
-    previewCanvas.classList.add("dragging");
-    startX = clientX;
-    startY = clientY;
-    startSliderX = Number(xSlider.value);
-    startSliderY = Number(ySlider.value);
-  }
-
-  function pointerMove(clientX, clientY) {
-    if (!dragging || !img) return;
-
     const { w, h } = getPreviewSize();
-    // 移動量をスライダー範囲（-1〜1）に変換
-    // 画面幅の半分程度動かすと端まで行く程度の感度
     const dx = (clientX - startX) / (w * 0.5);
     const dy = (clientY - startY) / (h * 0.5);
-
-    // 画像を動かす方向に合わせる（指を右に動かすと画像が右に＝左端が見える）
     let nx = startSliderX - dx;
     let ny = startSliderY - dy;
     nx = Math.max(-1, Math.min(1, nx));
     ny = Math.max(-1, Math.min(1, ny));
-
     xSlider.value = nx.toFixed(2);
     ySlider.value = ny.toFixed(2);
     updateSliderLabels();
     draw();
   }
 
+  function pointerDown(clientX, clientY) {
+    if (!img) return;
+    pointerActive = true;
+    panning = false;
+    scrolling = false;
+    startX = clientX;
+    startY = clientY;
+    startSliderX = Number(xSlider.value);
+    startSliderY = Number(ySlider.value);
+  }
+
+  function pointerMove(clientX, clientY, event) {
+    if (!pointerActive || !img) return;
+
+    const dx = clientX - startX;
+    const dy = clientY - startY;
+    const absX = Math.abs(dx);
+    const absY = Math.abs(dy);
+
+    // まだパン/スクロールを決めていない
+    if (!panning && !scrolling) {
+      if (absX < PAN_THRESHOLD && absY < PAN_THRESHOLD) return;
+
+      // 縦の動きが大きければスクロール扱い（パンしない）
+      if (absY > absX) {
+        scrolling = true;
+        return;
+      }
+      // 横の動きが主 → パン開始
+      panning = true;
+      previewCanvas.classList.add("dragging");
+    }
+
+    if (scrolling) return;
+
+    if (panning) {
+      if (event) event.preventDefault();
+      applyPan(clientX, clientY);
+    }
+  }
+
   function pointerUp() {
-    dragging = false;
+    pointerActive = false;
+    panning = false;
+    scrolling = false;
     previewCanvas.classList.remove("dragging");
   }
 
-  // マウス
+  // マウス（デスクトップは従来どおりすぐパン）
   previewCanvas.addEventListener("mousedown", (e) => {
     e.preventDefault();
     pointerDown(e.clientX, e.clientY);
+    panning = true;
+    previewCanvas.classList.add("dragging");
   });
   window.addEventListener("mousemove", (e) => {
-    if (dragging) pointerMove(e.clientX, e.clientY);
+    if (pointerActive && panning) {
+      applyPan(e.clientX, e.clientY);
+    }
   });
   window.addEventListener("mouseup", pointerUp);
 
-  // タッチ
+  // タッチ：縦スクロールを邪魔しない
   previewCanvas.addEventListener("touchstart", (e) => {
     if (e.touches.length !== 1) return;
-    e.preventDefault();
     const t = e.touches[0];
     pointerDown(t.clientX, t.clientY);
-  }, { passive: false });
+  }, { passive: true });
 
   window.addEventListener("touchmove", (e) => {
-    if (!dragging || e.touches.length !== 1) return;
-    e.preventDefault();
+    if (!pointerActive || e.touches.length !== 1) return;
     const t = e.touches[0];
-    pointerMove(t.clientX, t.clientY);
+    pointerMove(t.clientX, t.clientY, e);
   }, { passive: false });
 
   window.addEventListener("touchend", pointerUp);
