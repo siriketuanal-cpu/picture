@@ -488,10 +488,35 @@
 
   updateSliderLabels();
 
-  // ===== Service Worker（PWA） =====
+  // ===== Service Worker（PWA）・更新検知 =====
   if ("serviceWorker" in navigator) {
-    window.addEventListener("load", () => {
-      navigator.serviceWorker.register("./sw.js").catch(() => {});
+    window.addEventListener("load", async () => {
+      try {
+        const reg = await navigator.serviceWorker.register("./sw.js");
+
+        reg.addEventListener("updatefound", () => {
+          const newWorker = reg.installing;
+          if (!newWorker) return;
+          newWorker.addEventListener("statechange", () => {
+            // 新しい SW がインストールされ、すでに古い SW が動いている場合
+            if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
+              status.textContent = "新しい版があります。再読み込みします…";
+              setTimeout(() => location.reload(), 500);
+            }
+          });
+        });
+
+        // 開いたままのとき用に定期チェック
+        setInterval(() => reg.update().catch(() => {}), 60 * 1000);
+      } catch (_) {}
+    });
+
+    // 新しい SW が制御を奪ったときにリロード
+    let refreshing = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (refreshing) return;
+      refreshing = true;
+      location.reload();
     });
   }
 })();
