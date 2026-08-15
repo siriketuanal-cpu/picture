@@ -1,20 +1,11 @@
 // バージョンを上げると古いキャッシュが破棄される
-const CACHE_NAME = 'wallpaper-gen-v3';
+const CACHE_NAME = 'wallpaper-gen-v6';
 
 const ASSETS = [
   './',
   './index.html',
   './manifest.webmanifest',
-  './icon-72.png',
-  './icon-96.png',
-  './icon-128.png',
-  './icon-144.png',
-  './icon-152.png',
-  './icon-192.png',
-  './icon-384.png',
-  './icon-512.png',
-  './apple-touch-icon.png',
-  './favicon-32.png'
+  './pwa-icon.png'
 ];
 
 self.addEventListener('install', (event) => {

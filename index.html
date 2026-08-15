@@ -8,11 +8,11 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="壁紙生成">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="description" content="余白なし・フル解像度でスマホ待ち受け用に画像をトリミングするツール">
+<meta name="description" content="画像の見切れを抑え、ぼかし背景で自然に端末画面へ合わせる壁紙作成ツール">
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
-<link rel="apple-touch-icon" href="apple-touch-icon.png">
-<title>壁紙ジェネレーター（フルサイズ・トリミング）</title>
+<link rel="icon" type="image/png" href="pwa-icon.png">
+<link rel="apple-touch-icon" sizes="512x512" href="pwa-icon.png">
+<title>壁紙ジェネレーター（見切れ抑制）</title>
 <style>
   * {
     box-sizing: border-box;
@@ -116,6 +116,31 @@
     margin: 0 auto;
   }
 
+  .fit-mode {
+    display: grid;
+    grid-template-columns: 6.5em 1fr;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 14px;
+    font-size: 0.85rem;
+    color: #bbb;
+  }
+
+  .fit-mode select {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid #444;
+    border-radius: 8px;
+    background: #222;
+    color: #f0f0f0;
+    font: inherit;
+  }
+
+  input[type="range"]:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
   .slider-group {
     margin-bottom: 14px;
   }
@@ -209,7 +234,7 @@
 <body>
 
   <h1>壁紙ジェネレーター</h1>
-  <p class="subtitle">余白なし・フル解像度でスマホ待ち受け用にトリミング</p>
+  <p class="subtitle">画像をなるべく切らず、自然な背景補完でスマホ待ち受け用に調整</p>
 
   <div class="info-box" id="infoBox">
     対象解像度: <strong id="resText">検出中…</strong><br>
@@ -229,9 +254,17 @@
   </div>
 
   <div class="controls">
+    <div class="fit-mode">
+      <label for="fitMode">表示方式</label>
+      <select id="fitMode">
+        <option value="balanced" selected>見切れを抑える（おすすめ）</option>
+        <option value="cover">画面を埋める（従来方式）</option>
+      </select>
+    </div>
+
     <div class="slider-group">
       <label>
-        <span>左右位置</span>
+        <span id="xLabel">左右位置</span>
         <span class="value" id="xValue">0.00</span>
       </label>
       <input type="range" id="xSlider" min="-1" max="1" step="0.01" value="0">
@@ -242,7 +275,7 @@
       <button type="button" id="downloadBtn" disabled>画像を保存</button>
     </div>
 
-    <p class="hint">プレビューを左右にドラッグで位置調整（上下はそのままスクロール）</p>
+    <p class="hint" id="hintText">画像の横幅を残し、上下は画像由来のぼかし背景で自然に補います。</p>
     <p class="status" id="status"></p>
   </div>
 
@@ -263,6 +296,9 @@
   const previewCtx = previewCanvas.getContext("2d");
   const xSlider = document.getElementById("xSlider");
   const xValue = document.getElementById("xValue");
+  const fitMode = document.getElementById("fitMode");
+  const xLabel = document.getElementById("xLabel");
+  const hintText = document.getElementById("hintText");
   const resetBtn = document.getElementById("resetBtn");
   const downloadBtn = document.getElementById("downloadBtn");
   const imgInfo = document.getElementById("imgInfo");
@@ -277,6 +313,7 @@
 
   let img = null;
   let imgName = "";
+  let edgeProfile = null;
 
   // プレビュー表示サイズ（CSS幅に合わせて）
   function getPreviewSize() {
@@ -287,8 +324,144 @@
     return { w, h, scale: w / screenW };
   }
 
+  function needsHorizontalCrop() {
+    if (!img) return false;
+    // cover 時、画像のほうが端末より横長なら左右が切れる。
+    return (img.width / img.height) > (screenW / screenH);
+  }
+
+  function canPanX() {
+    return Boolean(img && fitMode.value === "cover" && needsHorizontalCrop());
+  }
+
   function updateSliderLabels() {
     xValue.textContent = Number(xSlider.value).toFixed(2);
+    const panEnabled = canPanX();
+    xSlider.disabled = !panEnabled;
+    xLabel.textContent = panEnabled ? "左右位置" : "左右位置（固定）";
+    hintText.textContent = fitMode.value === "balanced"
+      ? "画像の横幅を残し、上下端が単色に近いときは抽出色、それ以外はぼかし背景で自然に補います。"
+      : (panEnabled
+        ? "プレビューを左右にドラッグで位置調整（上下はそのままスクロール）"
+        : "この画像は横方向のトリミングが発生しないため、左右位置は固定です。");
+  }
+
+  function toCss(color, alpha = 1) {
+    return `rgba(${color.r}, ${color.g}, ${color.b}, ${alpha})`;
+  }
+
+  function readEdgeProfile() {
+    // 小さなプローブに縮小して解析するため、元画像が大きくても処理を重くしない。
+    const probe = document.createElement("canvas");
+    const probeW = 160;
+    const probeH = Math.max(24, Math.round(probeW * img.height / img.width));
+    probe.width = probeW;
+    probe.height = probeH;
+    const ctx = probe.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0, probeW, probeH);
+
+    try {
+      const pixels = ctx.getImageData(0, 0, probeW, probeH).data;
+      const stripH = Math.max(6, Math.round(probeH * 0.12));
+
+      function sampleStrip(startY) {
+        let r = 0, g = 0, b = 0, count = 0;
+        // 一つおきに採取し、平均色と各色成分のばらつきを求める。
+        for (let y = startY; y < startY + stripH; y += 2) {
+          for (let x = 0; x < probeW; x += 2) {
+            const index = (y * probeW + x) * 4;
+            r += pixels[index];
+            g += pixels[index + 1];
+            b += pixels[index + 2];
+            count += 1;
+          }
+        }
+        const color = { r: Math.round(r / count), g: Math.round(g / count), b: Math.round(b / count) };
+        let spread = 0;
+        for (let y = startY; y < startY + stripH; y += 2) {
+          for (let x = 0; x < probeW; x += 2) {
+            const index = (y * probeW + x) * 4;
+            spread += (pixels[index] - color.r) ** 2;
+            spread += (pixels[index + 1] - color.g) ** 2;
+            spread += (pixels[index + 2] - color.b) ** 2;
+          }
+        }
+        // 標準偏差が約22未満なら、単色・緩やかなグラデーションとして扱う。
+        const variance = spread / (count * 3);
+        return { color, flat: variance < 500 };
+      }
+
+      return {
+        top: sampleStrip(0),
+        bottom: sampleStrip(probeH - stripH)
+      };
+    } catch (_) {
+      // ピクセルを読み取れない画像は、安全に従来のぼかし背景へ戻す。
+      return null;
+    }
+  }
+
+  function drawBlurredBackground() {
+    // 背景は cover + ぼかし。画面外まで少し大きく描き、ぼかしの端の空白を防ぐ。
+    const bgScale = Math.max(screenW / img.width, screenH / img.height) * 1.08;
+    const bgW = img.width * bgScale;
+    const bgH = img.height * bgScale;
+    const bgX = (screenW - bgW) / 2;
+    const bgY = (screenH - bgH) / 2;
+
+    fullCtx.save();
+    fullCtx.filter = `blur(${Math.max(18, Math.round(screenW * 0.025))}px)`;
+    fullCtx.globalAlpha = 0.9;
+    fullCtx.drawImage(img, bgX, bgY, bgW, bgH);
+    fullCtx.restore();
+
+    // 背景の主張を少し抑え、時計やアイコンの視認性も確保する。
+    const shade = fullCtx.createLinearGradient(0, 0, 0, screenH);
+    shade.addColorStop(0, "rgba(0, 0, 0, 0.26)");
+    shade.addColorStop(0.22, "rgba(0, 0, 0, 0.10)");
+    shade.addColorStop(0.78, "rgba(0, 0, 0, 0.10)");
+    shade.addColorStop(1, "rgba(0, 0, 0, 0.32)");
+    fullCtx.fillStyle = shade;
+    fullCtx.fillRect(0, 0, screenW, screenH);
+  }
+
+  function drawFlatEdgeFill(color, y, height, fromTop) {
+    if (height <= 0) return;
+    const gradient = fullCtx.createLinearGradient(0, y, 0, y + height);
+    if (fromTop) {
+      gradient.addColorStop(0, toCss(color, 1));
+      gradient.addColorStop(0.7, toCss(color, 0.96));
+      gradient.addColorStop(1, toCss(color, 0.82));
+    } else {
+      gradient.addColorStop(0, toCss(color, 0.82));
+      gradient.addColorStop(0.3, toCss(color, 0.96));
+      gradient.addColorStop(1, toCss(color, 1));
+    }
+    fullCtx.fillStyle = gradient;
+    fullCtx.fillRect(0, y, screenW, height);
+  }
+
+  function drawBalancedWallpaper() {
+    // 前景は幅合わせ。左右を一切切らず、元画像はシャープに残す。
+    const fgScale = screenW / img.width;
+    const fgH = img.height * fgScale;
+    const fgY = (screenH - fgH) / 2;
+    const topGap = Math.max(0, fgY);
+    const bottomGap = Math.max(0, screenH - (fgY + fgH));
+    const profile = edgeProfile || readEdgeProfile();
+
+    // 上下端の両方が単色に近い画像は、ぼかさず端の実色で補完する。
+    if (profile?.top.flat && profile?.bottom.flat) {
+      drawFlatEdgeFill(profile.top.color, 0, topGap, true);
+      drawFlatEdgeFill(profile.bottom.color, screenH - bottomGap, bottomGap, false);
+    } else {
+      // 写真や情報量の多い画像では、元画像の雰囲気を保つぼかし背景を使う。
+      drawBlurredBackground();
+      if (profile?.top.flat) drawFlatEdgeFill(profile.top.color, 0, topGap, true);
+      if (profile?.bottom.flat) drawFlatEdgeFill(profile.bottom.color, screenH - bottomGap, bottomGap, false);
+    }
+
+    fullCtx.drawImage(img, 0, fgY, screenW, fgH);
   }
 
   function draw() {
@@ -296,24 +469,25 @@
 
     const imgRatio = img.width / img.height;
     const screenRatio = screenW / screenH;
-
-    let drawW, drawH;
-    // cover（余白なしで画面いっぱい）
-    if (imgRatio > screenRatio) {
-      drawH = screenH;
-      drawW = imgRatio * drawH;
-    } else {
-      drawW = screenW;
-      drawH = drawW / imgRatio;
-    }
-
-    // 左右のみ調整。上下は常に中央
-    const ox = (screenW - drawW) / 2 + Number(xSlider.value) * (drawW - screenW) / 2;
-    const oy = (screenH - drawH) / 2;
-
-    // フル解像度
     fullCtx.clearRect(0, 0, screenW, screenH);
-    fullCtx.drawImage(img, ox, oy, drawW, drawH);
+
+    // 縦長端末で左右が切れる画像だけ、幅合わせ＋ぼかし背景へ切り替える。
+    if (fitMode.value === "balanced" && needsHorizontalCrop()) {
+      drawBalancedWallpaper();
+    } else {
+      let drawW, drawH;
+      if (imgRatio > screenRatio) {
+        drawH = screenH;
+        drawW = imgRatio * drawH;
+      } else {
+        drawW = screenW;
+        drawH = drawW / imgRatio;
+      }
+
+      const ox = (screenW - drawW) / 2 + Number(xSlider.value) * (drawW - screenW) / 2;
+      const oy = (screenH - drawH) / 2;
+      fullCtx.drawImage(img, ox, oy, drawW, drawH);
+    }
 
     // プレビュー
     const { w, h } = getPreviewSize();
@@ -338,6 +512,7 @@
     image.onload = () => {
       URL.revokeObjectURL(url);
       img = image;
+      edgeProfile = readEdgeProfile();
       imgInfo.textContent = `${img.width} × ${img.height} px`;
       downloadBtn.disabled = false;
       status.textContent = "";
@@ -359,6 +534,12 @@
   }
   xSlider.addEventListener("input", onSlider);
 
+  fitMode.addEventListener("change", () => {
+    xSlider.value = 0;
+    updateSliderLabels();
+    draw();
+  });
+
   resetBtn.addEventListener("click", () => {
     xSlider.value = 0;
     updateSliderLabels();
@@ -374,7 +555,7 @@
   let startSliderX = 0;
 
   function applyPanX(clientX) {
-    if (!img) return;
+    if (!canPanX()) return;
     const { w } = getPreviewSize();
     const dx = (clientX - startX) / (w * 0.5);
     let nx = startSliderX - dx;
@@ -385,7 +566,7 @@
   }
 
   function pointerDown(clientX, clientY) {
-    if (!img) return;
+    if (!canPanX()) return;
     pointerActive = true;
     panning = false;
     scrolling = false;
@@ -431,6 +612,7 @@
 
   // マウス
   previewCanvas.addEventListener("mousedown", (e) => {
+    if (!canPanX()) return;
     e.preventDefault();
     pointerDown(e.clientX, e.clientY);
     panning = true;

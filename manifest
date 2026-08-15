@@ -1,0 +1,20 @@
+{
+  "name": "壁紙ジェネレーター",
+  "short_name": "壁紙生成",
+  "description": "画像の見切れを抑え、端部の色やぼかし背景で自然に端末画面へ合わせる壁紙作成ツール",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0d0d0d",
+  "theme_color": "#0d0d0d",
+  "lang": "ja",
+  "icons": [
+    {
+      "src": "pwa-icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
